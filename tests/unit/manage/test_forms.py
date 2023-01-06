@@ -347,7 +347,8 @@ class TestDeleteWebAuthnForm:
 
 
 class TestCreateMacaroonForm:
-    def test_creation(self):
+    @pytest.mark.parametrize("selected_project", [None, "foo"])
+    def test_creation(self, selected_project):
         user_id = pretend.stub()
         macaroon_service = pretend.stub()
         project_names = pretend.stub()
@@ -355,6 +356,7 @@ class TestCreateMacaroonForm:
             user_id=user_id,
             macaroon_service=macaroon_service,
             project_names=project_names,
+            selected_project=selected_project,
         )
 
         assert form.user_id is user_id
