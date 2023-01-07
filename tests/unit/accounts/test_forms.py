@@ -1040,6 +1040,7 @@ class TestReAuthenticateForm:
             "password",
             "next_route",
             "next_route_matchdict",
+            "next_route_query",
         ]
         assert isinstance(form.username, wtforms.StringField)
         assert isinstance(form.next_route, wtforms.StringField)
