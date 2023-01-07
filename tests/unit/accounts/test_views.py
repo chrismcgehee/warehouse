@@ -2871,10 +2871,12 @@ class TestReAuthentication:
         pyramid_request.user = pretend.stub(id=pretend.stub, username=pretend.stub())
         pyramid_request.matched_route = pretend.stub(name=pretend.stub())
         pyramid_request.matchdict = {"foo": "bar"}
+        pyramid_request.GET = pretend.stub(mixed=lambda: {"baz": "bar"})
 
         form_obj = pretend.stub(
             next_route=pretend.stub(data=next_route),
             next_route_matchdict=pretend.stub(data="{}"),
+            next_route_query=pretend.stub(data="{}"),
             validate=lambda: True,
         )
         form_class = pretend.call_recorder(lambda d, **kw: form_obj)
@@ -2883,6 +2885,7 @@ class TestReAuthentication:
             pyramid_request.method = "POST"
             pyramid_request.POST["next_route"] = next_route
             pyramid_request.POST["next_route_matchdict"] = "{}"
+            pyramid_request.POST["next_route_query"] = "{}"
 
         _ = views.reauthenticate(pyramid_request, _form_class=form_class)
 
@@ -2896,6 +2899,7 @@ class TestReAuthentication:
                 username=pyramid_request.user.username,
                 next_route=pyramid_request.matched_route.name,
                 next_route_matchdict=json.dumps(pyramid_request.matchdict),
+                next_route_query=json.dumps(pyramid_request.GET.mixed()),
                 action="reauthenticate",
                 user_service=user_service,
                 check_password_metrics_tags=[

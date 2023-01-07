@@ -412,7 +412,13 @@ class WebAuthnAuthenticationForm(WebAuthnCredentialMixin, _TwoFactorAuthenticati
 
 
 class ReAuthenticateForm(PasswordMixin, forms.Form):
-    __params__ = ["username", "password", "next_route", "next_route_matchdict"]
+    __params__ = [
+        "username",
+        "password",
+        "next_route",
+        "next_route_matchdict",
+        "next_route_query",
+    ]
 
     username = wtforms.fields.HiddenField(
         validators=[wtforms.validators.DataRequired()]
@@ -421,6 +427,9 @@ class ReAuthenticateForm(PasswordMixin, forms.Form):
         validators=[wtforms.validators.DataRequired()]
     )
     next_route_matchdict = wtforms.fields.HiddenField(
+        validators=[wtforms.validators.DataRequired()]
+    )
+    next_route_query = wtforms.fields.HiddenField(
         validators=[wtforms.validators.DataRequired()]
     )
 
