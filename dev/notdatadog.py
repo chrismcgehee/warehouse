@@ -10,13 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import asyncore
 import os
 import socket
-import smtpd
+import sys
 
 
-class AsyncoreSocketUDP(asyncore.dispatcher):
+class AsyncoreSocketUDP2(asyncore.dispatcher):
     def __init__(self, host="127.0.0.1", port=8125, output=True):
         asyncore.dispatcher.__init__(self)
         self.create_socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -38,12 +39,44 @@ class AsyncoreSocketUDP(asyncore.dispatcher):
     def writable(self):
         return False
 
+class AsyncoreSocketUDP(asyncio.DatagramProtocol):
+    def __init__(self, output):
+        super().__init__()
+        self.output = output
 
-if __name__ == "__main__":
-    options = smtpd.parseargs()
-    AsyncoreSocketUDP(
-        options.localhost,
-        options.localport,
-        os.environ.get("METRICS_OUTPUT", "").lower() == "true",
-    )
-    asyncore.loop()
+    def connection_made(self, transport):
+        print("Server Started...")
+
+    def datagram_received(self, data, addr):
+        if self.output:
+            print(data)
+            
+async def main(host, port, output):
+    loop = asyncio.get_event_loop()
+    t = loop.create_datagram_endpoint(lambda: AsyncoreSocketUDP(output), local_addr=(host, port))
+    loop.run_until_complete(t) # Server starts listening
+    loop.run_forever()
+
+if __name__ == '__main__':
+    try:
+        host, port = sys.argv[1].split(":")
+        port = int(port)
+    except:
+        print("Usage: python3 notdatadog.py <host>:<port>")
+        sys.exit(1)
+    output = os.environ.get("METRICS_OUTPUT", "").lower() == "true"
+    asyncio.run(main(host, port, output))
+
+    loop = asyncio.get_running_loop()
+    transport, protoco = loop.create_datagram_endpoint(lambda: AsyncoreSocketUDP(output), local_addr=(host, port))
+    loop.run_until_complete(t) # Server starts listening
+    loop.run_forever()
+
+# if __name__ == "__main__":
+
+#     AsyncoreSocketUDP(
+#         host,
+#         port,
+#         os.environ.get("METRICS_OUTPUT", "").lower() == "true",
+#     )
+#     asyncore.loop()
