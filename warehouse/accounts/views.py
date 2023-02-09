@@ -86,6 +86,7 @@ from warehouse.rate_limiting.interfaces import IRateLimiter
 from warehouse.utils.http import is_safe_url
 
 USER_ID_INSECURE_COOKIE = "user_id__insecure"
+DEVICE_ID_SECRET_COOKIE = "device_id_secret"
 
 
 @view_config(context=TooManyFailedLogins, has_translations=True)
@@ -190,8 +191,9 @@ def login(request, redirect_field_name=REDIRECT_FIELD_NAME, _form_class=LoginFor
             username = form.username.data
             userid = user_service.find_userid(username)
 
+            device_id= request.cookies.get(DEVICE_ID_SECRET_COOKIE)
             # If the user has enabled two factor authentication.
-            if user_service.has_two_factor(userid):
+            if user_service.has_two_factor(userid) and not user_service.check_user_device(userid, device_id):
                 two_factor_data = {"userid": userid}
                 if redirect_to:
                     two_factor_data["redirect_to"] = redirect_to

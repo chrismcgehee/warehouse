@@ -47,6 +47,7 @@ from warehouse.accounts.interfaces import (
     TooManyFailedLogins,
 )
 from warehouse.accounts.models import (
+    DeviceIdSecret,
     DisableReason,
     Email,
     ProhibitedUserName,
@@ -620,6 +621,26 @@ class DatabaseUserService:
     def get_password_timestamp(self, user_id):
         user = self.get_user(user_id)
         return user.password_date.timestamp() if user.password_date is not None else 0
+    
+    def check_user_device(self, user_id, device_id_secret):
+        if not device_id_secret:
+            return False
+        try:
+            device_id_secret = DeviceIdSecret.from_base64(device_id_secret)
+        except ValueError:
+            return False
+        user = self.get_user(user_id)
+        for device in user.user_devices:
+            if device.device_id != device_id_secret.device_id:
+                continue
+            
+            # todo risto: check if the device has not expired
+
+            if self.hasher.verify(device_id_secret.secret, device.device_secret):
+                return True
+        
+        return False
+
 
 
 @implementer(ITokenService)

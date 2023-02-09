@@ -10,8 +10,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import datetime
 import enum
+import json
 
 from citext import CIText
 from pyramid.authorization import Allow
@@ -297,6 +299,17 @@ class ProhibitedUserName(db.Model):
     prohibited_by = orm.relationship(User)
     comment = Column(Text, nullable=False, server_default="")
 
+class DeviceIdSecret:
+    def __init__(self, device_id, secret):
+        self.device_id = device_id
+        self.secret = secret
+    
+    def to_base64(self):
+        return base64.b64encode(json.dumps(self.__dict__).encode('utf-8')).decode('utf-8')
+    
+    @staticmethod
+    def from_base64(self, base64):
+        return DeviceIdSecret(**json.loads(base64.b64decode(base64).decode('utf-8')))
 
 class UserDevice(db.Model):
 
@@ -318,4 +331,5 @@ class UserDevice(db.Model):
     saved_date = Column(
         DateTime(timezone=False), nullable=False, server_default=sql.func.now()
     )
-    cookie_hash = Column(Text, unique=True, nullable=False)
+    device_secret = Column(String(length=128), unique=False, nullable=False)
+    device_id = Column(UUID(as_uuid=True), unique=True, nullable=False)

@@ -252,6 +252,11 @@ class IUserService(Interface):
         Returns POSIX timestamp corresponding to the datetime that the users password
         was most recently updated
         """
+    
+    def check_user_device(user_id, device_id):
+        """
+        Returns True if the device exists for this user and is not expired
+        """
 
 
 class ITokenService(Interface):
