@@ -191,9 +191,11 @@ def login(request, redirect_field_name=REDIRECT_FIELD_NAME, _form_class=LoginFor
             username = form.username.data
             userid = user_service.find_userid(username)
 
-            device_id= request.cookies.get(DEVICE_ID_SECRET_COOKIE)
-            # If the user has enabled two factor authentication.
-            if user_service.has_two_factor(userid) and not user_service.check_user_device(userid, device_id):
+            device_id_secret = request.cookies.get(DEVICE_ID_SECRET_COOKIE)
+            # If the user has enabled two-factor authentication and
+            # they do not have a valid saved device.
+            if (user_service.has_two_factor(userid)
+                    and not user_service.check_device_valid(userid, device_id_secret)):
                 two_factor_data = {"userid": userid}
                 if redirect_to:
                     two_factor_data["redirect_to"] = redirect_to

@@ -299,17 +299,23 @@ class ProhibitedUserName(db.Model):
     prohibited_by = orm.relationship(User)
     comment = Column(Text, nullable=False, server_default="")
 
+
 class DeviceIdSecret:
-    def __init__(self, device_id, secret):
+    def __init__(self, device_id: str, secret: str):
         self.device_id = device_id
         self.secret = secret
     
-    def to_base64(self):
-        return base64.b64encode(json.dumps(self.__dict__).encode('utf-8')).decode('utf-8')
+    def to_base64(self) -> str:
+        json_str = json.dumps({
+            "i": self.device_id,
+            "s": self.secret,
+        })
+        return base64.b64encode(json_str.encode("utf-8")).decode("utf-8")
     
     @staticmethod
-    def from_base64(self, base64):
-        return DeviceIdSecret(**json.loads(base64.b64decode(base64).decode('utf-8')))
+    def from_base64(b64: str) -> "DeviceIdSecret":
+        json_obj = json.loads(base64.b64decode(b64).decode("utf-8"))
+        return DeviceIdSecret(json_obj["i"], json_obj["s"])
 
 class UserDevice(db.Model):
 
@@ -331,5 +337,6 @@ class UserDevice(db.Model):
     saved_date = Column(
         DateTime(timezone=False), nullable=False, server_default=sql.func.now()
     )
+    # Stored as a hash of the device secret
     device_secret = Column(String(length=128), unique=False, nullable=False)
-    device_id = Column(UUID(as_uuid=True), unique=True, nullable=False)
+    device_id = Column(String(length=128), unique=False, nullable=False)

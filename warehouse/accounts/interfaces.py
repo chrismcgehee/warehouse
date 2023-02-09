@@ -253,7 +253,7 @@ class IUserService(Interface):
         was most recently updated
         """
     
-    def check_user_device(user_id, device_id):
+    def check_device_valid(user_id, device_id) -> bool:
         """
         Returns True if the device exists for this user and is not expired
         """
