@@ -123,6 +123,10 @@ class User(SitemapMixin, HasEvents, db.Model):
         lazy=True,
     )
 
+    user_devices = orm.relationship(
+        "UserDevice", backref="user", cascade="all, delete-orphan", lazy=True
+    )
+
     @property
     def primary_email(self):
         primaries = [x for x in self.emails if x.primary]
@@ -292,3 +296,26 @@ class ProhibitedUserName(db.Model):
     )
     prohibited_by = orm.relationship(User)
     comment = Column(Text, nullable=False, server_default="")
+
+
+class UserDevice(db.Model):
+
+    __tablename__ = "user_devices"
+    # __table_args__ = (
+    #     CheckConstraint(
+    #         "length(name) <= 50", name="prohibited_users_valid_username_length"
+    #     ),
+    #     CheckConstraint(
+    #         "name ~* '^([A-Z0-9]|[A-Z0-9][A-Z0-9._-]*[A-Z0-9])$'",
+    #         name="prohibited_users_valid_username",
+    #     ),
+    # )
+
+
+    user_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True
+    )
+    saved_date = Column(
+        DateTime(timezone=False), nullable=False, server_default=sql.func.now()
+    )
+    cookie_hash = Column(Text, unique=True, nullable=False)
