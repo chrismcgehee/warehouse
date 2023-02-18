@@ -192,8 +192,8 @@ def login(request, redirect_field_name=REDIRECT_FIELD_NAME, _form_class=LoginFor
             userid = user_service.find_userid(username)
 
             device_id_secret = request.cookies.get(DEVICE_ID_SECRET_COOKIE)
-            # If the user has enabled two-factor authentication and
-            # they do not have a valid saved device.
+            # If the user has enabled two-factor authentication and they do not have
+            # a valid saved device.
             if (user_service.has_two_factor(userid)
                     and not user_service.check_device_valid(userid, device_id_secret)):
                 two_factor_data = {"userid": userid}
@@ -305,6 +305,17 @@ def two_factor_and_totp_validate(request, _form_class=TOTPAuthenticationForm):
 
             if not two_factor_state.get("has_recovery_codes", False):
                 send_recovery_code_reminder_email(request, request.user)
+
+            if form.remember_device.data:
+                device_id_secret = user_service.generate_device_id_secret(userid)
+                resp.set_cookie(
+                    DEVICE_ID_SECRET_COOKIE,
+                    device_id_secret,
+                    max_age=31536000,
+                    secure=request.registry.settings.get("session.secure", True),
+                    httponly=True,
+                    samesite="lax",
+                )
 
             return resp
         else:

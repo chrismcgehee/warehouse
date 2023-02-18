@@ -12,9 +12,9 @@
 """
 adding user_devices table
 
-Revision ID: 941f073c285c
+Revision ID: eaf8f7e1eb05
 Revises: f93cf2d43974
-Create Date: 2023-02-09 04:07:17.370204
+Create Date: 2023-02-18 17:42:24.529488
 """
 
 import sqlalchemy as sa
@@ -22,7 +22,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision = "941f073c285c"
+revision = "eaf8f7e1eb05"
 down_revision = "f93cf2d43974"
 
 # Note: It is VERY important to ensure that a migration does not lock for a
@@ -62,13 +62,13 @@ def upgrade():
         sa.Column(
             "saved_date", sa.DateTime(), server_default=sa.text("now()"), nullable=False
         ),
-        sa.Column("cookie_hash", sa.Text(), nullable=False),
+        sa.Column("device_secret", sa.String(length=128), nullable=False),
+        sa.Column("device_id", sa.String(length=128), nullable=False),
         sa.ForeignKeyConstraint(
             ["user_id"],
             ["users.id"],
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("cookie_hash"),
     )
     op.create_index(
         op.f("ix_user_devices_user_id"), "user_devices", ["user_id"], unique=False

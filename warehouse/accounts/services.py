@@ -627,6 +627,9 @@ class DatabaseUserService:
         return user.password_date.timestamp() if user.password_date is not None else 0
     
     def check_device_valid(self, user_id: str, device_id_secret: str) -> bool:
+        """
+        Checks whether the given device id and secret are valid for the given user.
+        """
         if not device_id_secret:
             return False
         try:
@@ -650,6 +653,10 @@ class DatabaseUserService:
         return False
 
     def generate_device_id_secret(self, user_id: str) -> str:
+        """
+        Generates and saves to the database a new device id and secret for the given
+        user. Returns the device id and secret as a base64 encoded string.
+        """
         user = self.get_user(user_id)
 
         device_id = self._generate_device_id(user)
