@@ -658,6 +658,14 @@ class DatabaseUserService:
         user. Returns the device id and secret as a base64 encoded string.
         """
         user = self.get_user(user_id)
+        #
+        # recovery_codes = [
+        #     secrets.token_hex(RECOVERY_CODE_BYTES) for _ in range(RECOVERY_CODE_COUNT)
+        # ]
+        # for recovery_code in recovery_codes:
+        #     self.db.add(RecoveryCode(user=user, code=self.hasher.hash(recovery_code)))
+        #
+        # self.db.flush()
 
         device_id = self._generate_device_id(user)
         device_secret = secrets.token_urlsafe(DEVICE_SECRET_BYTES)

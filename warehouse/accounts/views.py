@@ -87,6 +87,7 @@ from warehouse.utils.http import is_safe_url
 
 USER_ID_INSECURE_COOKIE = "user_id__insecure"
 DEVICE_ID_SECRET_COOKIE = "device_id_secret"
+DEVICE_ID_SECRET_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 @view_config(context=TooManyFailedLogins, has_translations=True)
@@ -311,10 +312,10 @@ def two_factor_and_totp_validate(request, _form_class=TOTPAuthenticationForm):
                 resp.set_cookie(
                     DEVICE_ID_SECRET_COOKIE,
                     device_id_secret,
-                    max_age=31536000,
-                    secure=request.registry.settings.get("session.secure", True),
+                    max_age=DEVICE_ID_SECRET_MAX_AGE,
                     httponly=True,
-                    samesite="lax",
+                    secure=request.scheme == "https",
+                    samesite=b"lax",
                 )
 
             return resp
