@@ -307,16 +307,7 @@ def two_factor_and_totp_validate(request, _form_class=TOTPAuthenticationForm):
             if not two_factor_state.get("has_recovery_codes", False):
                 send_recovery_code_reminder_email(request, request.user)
 
-            if form.remember_device.data:
-                device_id_secret = user_service.generate_device_id_secret(userid)
-                resp.set_cookie(
-                    DEVICE_ID_SECRET_COOKIE,
-                    device_id_secret,
-                    max_age=DEVICE_ID_SECRET_MAX_AGE,
-                    httponly=True,
-                    secure=request.scheme == "https",
-                    samesite=b"lax",
-                )
+            _handle_remember_device(form, request, resp, userid, user_service)
 
             return resp
         else:
@@ -411,6 +402,8 @@ def webauthn_authentication_validate(request):
 
         if not request.user.has_recovery_codes:
             send_recovery_code_reminder_email(request, request.user)
+
+        _handle_remember_device(form, request, request.response, userid, user_service)
 
         return {
             "success": request._("Successful WebAuthn assertion"),
@@ -1572,3 +1565,22 @@ class ManageAccountPublishingViews:
             return HTTPSeeOther(self.request.path)
 
         return self.default_response
+
+
+def _handle_remember_device(form, request, response, userid, user_service) -> None:
+    """
+    Saves the device if the user checked the "remember device" checkbox.
+    """
+    if not form.remember_device.data:
+        return
+
+    device_id_secret = user_service.generate_device_id_secret(userid)
+    response.set_cookie(
+        DEVICE_ID_SECRET_COOKIE,
+        device_id_secret,
+        max_age=DEVICE_ID_SECRET_MAX_AGE,
+        httponly=True,
+        secure=request.scheme == "https",
+        samesite=b"lax",
+        path=request.route_path("accounts.login"),
+    )

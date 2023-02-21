@@ -630,12 +630,19 @@ class DatabaseUserService:
         """
         Checks whether the given device id and secret are valid for the given user.
         """
+        self._metrics.increment("warehouse.authentication.check_device_valid.start")
+
         if not device_id_secret:
             return False
         try:
             device_id_secret = DeviceIdSecret.from_base64(device_id_secret)
         except ValueError:
             return False
+
+        self._check_ratelimits(
+            userid=user_id,
+            tags=["mechanism:check_device_valid"],
+        )
 
         user = self.get_user(user_id)
         for device in user.user_devices:
@@ -648,8 +655,10 @@ class DatabaseUserService:
                 continue
 
             if self.hasher.verify(device_id_secret.secret, device.device_secret):
+                self._metrics.increment("warehouse.authentication.check_device_valid.ok")
                 return True
-        
+
+        self._metrics.increment("warehouse.authentication.check_device_valid.failure")
         return False
 
     def generate_device_id_secret(self, user_id: str) -> str:
@@ -658,14 +667,6 @@ class DatabaseUserService:
         user. Returns the device id and secret as a base64 encoded string.
         """
         user = self.get_user(user_id)
-        #
-        # recovery_codes = [
-        #     secrets.token_hex(RECOVERY_CODE_BYTES) for _ in range(RECOVERY_CODE_COUNT)
-        # ]
-        # for recovery_code in recovery_codes:
-        #     self.db.add(RecoveryCode(user=user, code=self.hasher.hash(recovery_code)))
-        #
-        # self.db.flush()
 
         device_id = self._generate_device_id(user)
         device_secret = secrets.token_urlsafe(DEVICE_SECRET_BYTES)
