@@ -12,6 +12,7 @@
 
 import collections
 import datetime
+import secrets
 import uuid
 
 import freezegun
@@ -43,7 +44,7 @@ from warehouse.accounts.interfaces import (
     TooManyEmailsAdded,
     TooManyFailedLogins,
 )
-from warehouse.accounts.models import DisableReason, ProhibitedUserName
+from warehouse.accounts.models import DeviceIdSecret, DisableReason, ProhibitedUserName
 from warehouse.events.tags import EventTag
 from warehouse.metrics import IMetricsService, NullMetrics
 from warehouse.rate_limiting.interfaces import IRateLimiter
@@ -884,6 +885,107 @@ class TestDatabaseUserService:
                 "warehouse.authentication.recovery_code.failure",
                 tags=["failure_reason:burned_recovery_code"],
             ),
+        ]
+
+    def test_generate_device_id_secret(self, user_service, monkeypatch):
+        user = UserFactory.create()
+
+        device_id_secret1 = user_service.generate_device_id_secret(user.id)
+        assert device_id_secret1 is not None
+        assert isinstance(device_id_secret1, str)
+        assert len(device_id_secret1) >= 32
+
+        # Make sure the same user can generate a 2nd device_id_secret
+        device_id_secret2 = user_service.generate_device_id_secret(user.id)
+        assert device_id_secret2 is not None
+        assert isinstance(device_id_secret2, str)
+        assert len(device_id_secret2) >= 32
+        assert device_id_secret1 != device_id_secret2
+
+        # Make sure the code handles things properly when it cannot generate an unused
+        # secret
+        monkeypatch.setattr(
+            secrets, "token_urlsafe", lambda length: "same_thing_every_time"
+        )
+        user_service.generate_device_id_secret(user.id)
+        with pytest.raises(RuntimeError):
+            user_service.generate_device_id_secret(user.id)
+
+    def test_check_device_valid(self, user_service, metrics):
+        user = UserFactory.create()
+
+        assert not user_service.check_device_valid(user.id, "")
+        assert not user_service.check_device_valid(user.id, "non!valid%base64#string")
+        # Base64 encoding of 'notAJsonString'
+        assert not user_service.check_device_valid(user.id, "bm90QUpzb25TdHJpbmcK")
+        # Base64 encoding of '{"wrong": "format"}'
+        assert not user_service.check_device_valid(
+            user.id, "eyJ3cm9uZyI6ICJmb3JtYXQifQo="
+        )
+        # Base64 encoding of '{"i": "abcdefg", "s": "hijklmnopqrstuvwxyz"}'
+        assert not user_service.check_device_valid(
+            user.id, "eyJpIjogImFiY2RlZmciLCAicyI6ICJoaWprbG1ub3BxcnN0dXZ3eHl6In0K"
+        )
+
+        device_id_secret_b64 = user_service.generate_device_id_secret(user.id)
+        user_service.db.flush()
+
+        # Base64 encoding of '{"i": "abcdefg", "s": "hijklmnopqrstuvwxyz"}'
+        assert not user_service.check_device_valid(
+            user.id, "eyJpIjogImFiY2RlZmciLCAicyI6ICJoaWprbG1ub3BxcnN0dXZ3eHl6In0K"
+        )
+        device_id_secret = DeviceIdSecret.from_base64(device_id_secret_b64)
+        device_id_secret.device_id = "wrongDeviceId"
+        assert not user_service.check_device_valid(
+            user.id, device_id_secret.to_base64()
+        )
+        device_id_secret = DeviceIdSecret.from_base64(device_id_secret_b64)
+        device_id_secret.secret = "wrongSecret"
+        assert not user_service.check_device_valid(
+            user.id, device_id_secret.to_base64()
+        )
+
+        other_user = UserFactory.create()
+        assert not user_service.check_device_valid(other_user.id, device_id_secret_b64)
+
+        assert user_service.check_device_valid(user.id, device_id_secret_b64)
+
+        device_id_secret_b64_2nd = user_service.generate_device_id_secret(user.id)
+        user_service.db.flush()
+
+        assert user_service.check_device_valid(user.id, device_id_secret_b64)
+        assert user_service.check_device_valid(user.id, device_id_secret_b64_2nd)
+
+        thirty_one_days_in_the_future = datetime.datetime.utcnow() + datetime.timedelta(
+            days=31
+        )
+        with freezegun.freeze_time(thirty_one_days_in_the_future):
+            # The device ID secret should be expired.
+            assert not user_service.check_device_valid(user.id, device_id_secret_b64)
+
+        assert metrics.increment.calls == [
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.ok"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.ok"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.ok"),
+            pretend.call("warehouse.authentication.check_device_valid.start"),
+            pretend.call("warehouse.authentication.check_device_valid.failure"),
         ]
 
     def test_check_recovery_code_global_rate_limited(self, user_service, metrics):
