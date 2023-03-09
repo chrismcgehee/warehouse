@@ -296,6 +296,67 @@ class TestLogin:
         assert pyramid_request.session.new_csrf_token.calls == [pretend.call()]
         assert pyramid_request.session.record_auth_timestamp.calls == [pretend.call()]
 
+    def test_post_validate_valid_device(
+        self, monkeypatch, pyramid_request, pyramid_services
+    ):
+        monkeypatch.setattr(
+            views, "remember", lambda request, user_id: [("foo", "bar")]
+        )
+
+        new_session = {}
+
+        user_id = uuid.uuid4()
+        user_service = pretend.stub(
+            find_userid=lambda username: user_id,
+            update_user=lambda *a, **kw: None,
+            has_two_factor=lambda userid: True,
+            record_event=pretend.call_recorder(lambda *a, **kw: None),
+            get_password_timestamp=lambda userid: 0,
+            check_device_valid=lambda userid, device_id_secret: True,
+        )
+        breach_service = pretend.stub(check_password=lambda password, tags=None: False)
+
+        pyramid_services.register_service(user_service, IUserService, None)
+        pyramid_services.register_service(
+            breach_service, IPasswordBreachedService, None
+        )
+
+        pyramid_request.method = "POST"
+        pyramid_request.session = pretend.stub(
+            items=lambda: [("a", "b"), ("foo", "bar")],
+            update=new_session.update,
+            invalidate=lambda: None,
+            new_csrf_token=lambda: None,
+        )
+
+        pyramid_request.registry.settings = {"sessions.secret": "dummy_secret"}
+        pyramid_request.session.record_auth_timestamp = lambda *args: None
+        pyramid_request.session.record_password_timestamp = lambda timestamp: None
+
+        form_obj = pretend.stub(
+            validate=lambda: True,
+            username=pretend.stub(data="theuser"),
+            password=pretend.stub(data="password"),
+        )
+
+        pyramid_request.route_path = lambda a: "/the-redirect"
+
+        now = datetime.datetime.utcnow()
+
+        with freezegun.freeze_time(now):
+            result = views.login(pyramid_request, _form_class=lambda *a, **kw: form_obj)
+
+        # Other tests are doing more thorough assertions for the login flow, here we
+        # just want to make sure that we are logged in.
+        assert isinstance(result, HTTPSeeOther)
+        assert user_service.record_event.calls == [
+            pretend.call(
+                user_id,
+                tag=EventTag.Account.LoginSuccess,
+                additional={"two_factor_method": None, "two_factor_label": None},
+            )
+        ]
+
     @pytest.mark.parametrize(
         # The set of all possible next URLs. Since this set is infinite, we
         # test only a finite set of reasonable URLs.
@@ -363,6 +424,7 @@ class TestLogin:
             update_user=lambda *a, **k: None,
             has_two_factor=lambda userid: True,
             record_event=pretend.call_recorder(lambda *a, **kw: None),
+            check_device_valid=lambda user_id, device_id_secret_b64: False,
         )
 
         breach_service = pretend.stub(check_password=lambda pw: False)
@@ -617,11 +679,20 @@ class TestTwoFactor:
 
     @pytest.mark.parametrize("redirect_url", ["test_redirect_url", None])
     @pytest.mark.parametrize("has_recovery_codes", [True, False])
+    @pytest.mark.parametrize("remember_device", [True, False])
     def test_totp_auth(
-        self, monkeypatch, pyramid_request, redirect_url, has_recovery_codes
+        self,
+        monkeypatch,
+        pyramid_request,
+        redirect_url,
+        has_recovery_codes,
+        remember_device,
     ):
         remember = pretend.call_recorder(lambda request, user_id: [("foo", "bar")])
         monkeypatch.setattr(views, "remember", remember)
+
+        set_cookie = pretend.call_recorder(lambda *a, **k: None)
+        monkeypatch.setattr(HTTPSeeOther, "set_cookie", set_cookie)
 
         query_params = {"userid": str(1)}
         if redirect_url:
@@ -647,6 +718,7 @@ class TestTwoFactor:
             check_totp_value=lambda userid, totp_value: True,
             record_event=pretend.call_recorder(lambda *a, **kw: None),
             get_password_timestamp=lambda userid: 0,
+            generate_device_id_secret=lambda userid: "super_secret",
         )
 
         new_session = {}
@@ -676,6 +748,7 @@ class TestTwoFactor:
         form_obj = pretend.stub(
             validate=pretend.call_recorder(lambda: True),
             totp_value=pretend.stub(data="test-otp-secret"),
+            remember_device=pretend.stub(data=remember_device),
         )
         form_class = pretend.call_recorder(lambda d, user_service, **kw: form_obj)
         pyramid_request.route_path = pretend.call_recorder(
@@ -685,6 +758,7 @@ class TestTwoFactor:
             get=pretend.call_recorder(lambda k: query_params.get(k))
         )
         pyramid_request.user = user
+        pyramid_request.scheme = "https"
 
         send_email = pretend.call_recorder(lambda *a: None)
         monkeypatch.setattr(views, "send_recovery_code_reminder_email", send_email)
@@ -702,17 +776,31 @@ class TestTwoFactor:
         assert remember.calls == [pretend.call(pyramid_request, str(1))]
         assert pyramid_request.session.invalidate.calls == [pretend.call()]
         assert pyramid_request.session.new_csrf_token.calls == [pretend.call()]
-        assert user_service.record_event.calls == [
+
+        expected_record_event_calls = [
             pretend.call(
                 "1",
                 tag=EventTag.Account.LoginSuccess,
                 additional={"two_factor_method": "totp", "two_factor_label": "totp"},
             )
         ]
+        if remember_device:
+            expected_record_event_calls.append(
+                pretend.call(
+                    "1",
+                    tag=EventTag.Account.TwoFactorDeviceRemembered,
+                    additional={"two_factor_method": "totp"},
+                )
+            )
+        assert user_service.record_event.calls == expected_record_event_calls
         assert pyramid_request.session.record_auth_timestamp.calls == [pretend.call()]
         assert send_email.calls == (
             [] if has_recovery_codes else [pretend.call(pyramid_request, user)]
         )
+        device_secret_cookie_was_set = any(
+            call.args[1] == views.DEVICE_ID_SECRET_COOKIE for call in set_cookie.calls
+        )
+        assert device_secret_cookie_was_set == remember_device
 
     def test_totp_auth_already_authed(self):
         request = pretend.stub(
@@ -924,7 +1012,10 @@ class TestWebAuthn:
         assert result == {"fail": {"errors": ["Fake validation failure"]}}
 
     @pytest.mark.parametrize("has_recovery_codes", [True, False])
-    def test_webauthn_validate(self, monkeypatch, pyramid_request, has_recovery_codes):
+    @pytest.mark.parametrize("remember_device", [True, False])
+    def test_webauthn_validate(
+        self, monkeypatch, pyramid_request, has_recovery_codes, remember_device
+    ):
         _get_two_factor_data = pretend.call_recorder(
             lambda r: {"redirect_to": "foobar", "userid": 1}
         )
@@ -943,6 +1034,8 @@ class TestWebAuthn:
             get_webauthn_by_credential_id=pretend.call_recorder(
                 lambda *a: pretend.stub(label="webauthn_label")
             ),
+            generate_device_id_secret=lambda userid: "super_secret",
+            record_event=pretend.call_recorder(lambda *a, **kw: None),
         )
         pyramid_request.session = pretend.stub(
             get_webauthn_challenge=pretend.call_recorder(lambda: "not_real"),
@@ -950,6 +1043,11 @@ class TestWebAuthn:
         )
         pyramid_request.find_service = lambda *a, **kw: user_service
         pyramid_request.user = user
+        pyramid_request.scheme = "https"
+        pyramid_request.response = pretend.stub(
+            set_cookie=pretend.call_recorder(lambda *a, **kw: None),
+        )
+        pyramid_request.route_path = lambda a: "/account/two-factor"
 
         form_obj = pretend.stub(
             validate=pretend.call_recorder(lambda: True),
@@ -960,6 +1058,7 @@ class TestWebAuthn:
                 credential_device_type="single_device",
                 credential_backed_up=False,
             ),
+            remember_device=pretend.stub(data=remember_device),
         )
         form_class = pretend.call_recorder(lambda *a, **kw: form_obj)
         monkeypatch.setattr(views, "WebAuthnAuthenticationForm", form_class)
@@ -974,7 +1073,7 @@ class TestWebAuthn:
             pretend.call(
                 pyramid_request,
                 1,
-                two_factor_method="webauthn",
+                "webauthn",
                 two_factor_label="webauthn_label",
             )
         ]
@@ -985,6 +1084,19 @@ class TestWebAuthn:
         assert send_email.calls == (
             [] if has_recovery_codes else [pretend.call(pyramid_request, user)]
         )
+        device_secret_cookie_was_set = any(
+            call.args[0] == views.DEVICE_ID_SECRET_COOKIE
+            for call in pyramid_request.response.set_cookie.calls
+        )
+        assert device_secret_cookie_was_set == remember_device
+        if remember_device:
+            assert user_service.record_event.calls == [
+                pretend.call(
+                    1,
+                    tag=EventTag.Account.TwoFactorDeviceRemembered,
+                    additional={"two_factor_method": "webauthn"},
+                )
+            ]
 
         assert result == {
             "success": "Successful WebAuthn assertion",

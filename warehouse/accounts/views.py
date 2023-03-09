@@ -87,6 +87,8 @@ from warehouse.rate_limiting.interfaces import IRateLimiter
 from warehouse.utils.http import is_safe_url
 
 USER_ID_INSECURE_COOKIE = "user_id__insecure"
+DEVICE_ID_SECRET_COOKIE = "device_id_secret"
+DEVICE_ID_SECRET_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
 @view_config(context=TooManyFailedLogins, has_translations=True)
@@ -191,8 +193,12 @@ def login(request, redirect_field_name=REDIRECT_FIELD_NAME, _form_class=LoginFor
             username = form.username.data
             userid = user_service.find_userid(username)
 
-            # If the user has enabled two factor authentication.
-            if user_service.has_two_factor(userid):
+            device_id_secret = request.cookies.get(DEVICE_ID_SECRET_COOKIE)
+            # If the user has enabled two-factor authentication and they do not have
+            # a valid saved device.
+            if user_service.has_two_factor(
+                userid
+            ) and not user_service.check_device_valid(userid, device_id_secret):
                 two_factor_data = {"userid": userid}
                 if redirect_to:
                     two_factor_data["redirect_to"] = redirect_to
@@ -287,9 +293,8 @@ def two_factor_and_totp_validate(request, _form_class=TOTPAuthenticationForm):
     if request.method == "POST":
         form = two_factor_state["totp_form"]
         if form.validate():
-            _login_user(
-                request, userid, two_factor_method="totp", two_factor_label="totp"
-            )
+            two_factor_method = "totp"
+            _login_user(request, userid, two_factor_method, two_factor_label="totp")
             user_service.update_user(userid, last_totp_value=form.totp_value.data)
 
             resp = HTTPSeeOther(redirect_to)
@@ -302,6 +307,9 @@ def two_factor_and_totp_validate(request, _form_class=TOTPAuthenticationForm):
 
             if not two_factor_state.get("has_recovery_codes", False):
                 send_recovery_code_reminder_email(request, request.user)
+
+            if form.remember_device.data:
+                _remember_device(request, resp, userid, user_service, two_factor_method)
 
             return resp
         else:
@@ -380,10 +388,11 @@ def webauthn_authentication_validate(request):
         )
         webauthn.sign_count = form.validated_credential.new_sign_count
 
+        two_factor_method = "webauthn"
         _login_user(
             request,
             userid,
-            two_factor_method="webauthn",
+            two_factor_method,
             two_factor_label=webauthn.label,
         )
 
@@ -396,6 +405,11 @@ def webauthn_authentication_validate(request):
 
         if not request.user.has_recovery_codes:
             send_recovery_code_reminder_email(request, request.user)
+
+        if form.remember_device.data:
+            _remember_device(
+                request, request.response, userid, user_service, two_factor_method
+            )
 
         return {
             "success": request._("Successful WebAuthn assertion"),
@@ -842,6 +856,31 @@ def _get_two_factor_data(request, _redirect_to="/"):
         two_factor_data["redirect_to"] = _redirect_to
 
     return two_factor_data
+
+
+def _remember_device(
+    request, response, userid, user_service, two_factor_method
+) -> None:
+    """
+    Generates and sets a cookie for remembering this device.
+    """
+    device_id_secret = user_service.generate_device_id_secret(userid)
+    response.set_cookie(
+        DEVICE_ID_SECRET_COOKIE,
+        device_id_secret,
+        max_age=DEVICE_ID_SECRET_MAX_AGE,
+        httponly=True,
+        secure=request.scheme == "https",
+        samesite=b"lax",
+        path=request.route_path("accounts.login"),
+    )
+    user_service.record_event(
+        userid,
+        tag=EventTag.Account.TwoFactorDeviceRemembered,
+        additional={
+            "two_factor_method": two_factor_method,
+        },
+    )
 
 
 @view_config(
