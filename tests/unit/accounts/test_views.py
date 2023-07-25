@@ -1149,7 +1149,7 @@ class TestRememberDevice:
         )
         assert not views._check_remember_device_token(request, 1)
 
-    def test_remember_device(self, monkeypatch, pyramid_request):
+    def test_remember_device(self):
         token_service = pretend.stub(dumps=lambda *a: "token_data")
         pyramid_request = pretend.stub(
             find_service=lambda interface, **kwargs: {
@@ -1172,7 +1172,7 @@ class TestRememberDevice:
                 max_age=REMEMBER_DEVICE_SECONDS,
                 httponly=True,
                 secure=True,
-                samesite=b"lax",
+                samesite=b"strict",
                 path="/accounts/login",
             )
         ]
